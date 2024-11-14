@@ -12,4 +12,5 @@ XPINNs
 
 
 PIDNs
-![PIDNs for Blasius on large domain ](images/pidn-1000-function value.png)
+![PIDNs for Blasius on large domain ](images/pidn_1000_function value.png)
+![PIDNs for Blasius on large domain ](images/pidn_1000_derivative.png)
