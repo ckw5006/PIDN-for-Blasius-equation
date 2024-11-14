@@ -3,3 +3,13 @@ By fitting derivative values instead of function values, our method can stably s
 whereas the PINNs method often fails to fit correctly over such long intervals.
  Our method, PIDN, has successfully fitted the Blasius equation over intervals ranging from 1000 to 3000, without any involvement of numerical solutions,
   requiring only initial and boundary conditions.
+PINNs
+![PINNs for Blasius on small domain ](images/comparison_plot_PINNs.png)
+
+
+XPINNs
+![XPINNs for Blasius on small domain ](images/comparison_plot_xpinns.png)
+
+
+PIDNs
+![PIDNs for Blasius on large domain ](images/pidn-1000-function value.png)
