@@ -53,16 +53,18 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     if not os.path.exists(csv_file):
         with open(csv_file, mode="w", newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["Epochs", "Training Time (s)", "FLOPs (NN)", "FLOPs (Runge-Kutta)"])
+            writer.writerow(["Epochs", "Training Time (s)", "FLOPs (NN)", "FLOPs (Runge-Kutta)", "Math Solution Time (s)", "Model Test Time (s)"])
 
     start_time = time.time()
 
-    # 计算 FLOPs for NN
-    dummy_input = torch.randn(1, 1).to(inputs.device)
-    flops_nn, _ = profile(model, inputs=(dummy_input,), verbose=False)
+    total_flops_nn = 0  # 累计 FLOPs
 
     for epoch in tqdm(range(epochs), desc="Training Progress"):
         optimizer.zero_grad()
+
+        # 计算模型前向传播的 FLOPs
+        flops, _ = profile(model, inputs=(inputs,), verbose=False)
+        total_flops_nn += flops
 
         function_values, grads1, grads2, grads3 = compute_derivatives(inputs, model)
 
@@ -101,10 +103,22 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     num_points = inputs.size(0)
     flops_runge_kutta = runge_kutta_flops(num_points)
 
+    # 数学方法计算时间
+    math_start_time = time.time()
+    y_true, y_true_derivative = true_solution(inputs.cpu().detach().numpy().flatten())
+    math_end_time = time.time()
+    math_solution_time = math_end_time - math_start_time
+
+    # 测试阶段模型运行时间
+    test_start_time = time.time()
+    outputs, grads1, _, _ = compute_derivatives(inputs, model)
+    test_end_time = time.time()
+    model_test_time = test_end_time - test_start_time
+
     # 将训练时间和 FLOPs 写入 CSV 文件
     with open(csv_file, mode="a", newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([epochs, training_time, flops_nn, flops_runge_kutta])
+        writer.writerow([epochs, training_time, total_flops_nn, flops_runge_kutta, math_solution_time, model_test_time])
 
 
 # 数据生成
@@ -129,7 +143,7 @@ def true_solution(x):
     y[2, 0] = 0.33206  # f''(0) = 0.33206
 
     sol = solve_bvp(fun, bc, x, y)
-    return sol.sol(x)[0]
+    return sol.sol(x)[0], sol.sol(x)[1]
 
 
 # 初始化模型、损失函数和优化器
@@ -147,12 +161,12 @@ if os.path.exists(save_path):
     print("模型权重已加载。")
 
 # 生成数据
-start, end = 0, 10
+start, end = 0, 5
 num_points_per_unit = 100
 inputs = generate_data(start, end, num_points_per_unit).to(device)
 
 # 训练模型
-train_model(model, criterion, optimizer, inputs, epochs=100, save_path=save_path)
+train_model(model, criterion, optimizer, inputs, epochs=200, save_path=save_path)
 
 # 测试和可视化
 outputs, grads1, _, _ = compute_derivatives(inputs, model)
@@ -161,7 +175,7 @@ grads1 = grads1.cpu().detach().numpy()
 
 # 数学方式求解的结果
 x = inputs.cpu().detach().numpy().flatten()
-y_true = true_solution(x)
+y_true, y_true_derivative = true_solution(x)
 
 # 计算误差指标
 mse = mean_squared_error(y_true, outputs)
@@ -177,22 +191,22 @@ print(f'R² Score: {r2:.4f}')
 
 # 绘制函数值比较图并保存
 plt.figure()
-plt.plot(x, y_true, label='Mathematical Solution (Runge-Kutta Method)', color='red', linestyle='--')
-plt.plot(x, outputs, label='Predicted Function (PINNs)', color='blue')
+plt.plot(x, y_true, label='Mathematical Solution ', color='red', linestyle='--')
+plt.plot(x, outputs, label='Predicted Function (PIDNs)', color='blue')
 plt.legend()
 plt.xlabel('x')
 plt.ylabel('f(x)')
-plt.title('Comparison of Mathematical Solution and PINNs Function Prediction')
+plt.title('Comparison of Mathematical Solution and PIDNs Function Prediction')
 plt.savefig('comparison_function_plot.png')  # 保存生成的图片
 plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-plt.plot(x, y_true, label='Mathematical First Derivative (Runge-Kutta Method)', color='red', linestyle='--')
-plt.plot(x, grads1, label='Predicted First Derivative (PINNs)', color='green')
+plt.plot(x, y_true_derivative, label='Mathematical First Derivative', color='red', linestyle='--')
+plt.plot(x, grads1, label='Predicted First Derivative (PIDNs)', color='green')
 plt.legend(loc='upper left')
 plt.xlabel('x')
 plt.ylabel("f'(x)")
-plt.title('Comparison of Mathematical and Predicted First Derivative (PINNs)')
+plt.title('Comparison of Mathematical and Predicted First Derivative (PIDNs)')
 plt.savefig('comparison_derivative_plot.png')  # 保存生成的图片
 plt.show()

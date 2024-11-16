@@ -11,7 +11,6 @@ import time
 import csv
 from thop import profile
 
-
 # 定义神经网络结构
 class FunctionApproximator(nn.Module):
     def __init__(self):
@@ -28,7 +27,6 @@ class FunctionApproximator(nn.Module):
         output = self.output_layer(x)
         return output
 
-
 # 自动微分计算多阶导数
 def compute_derivatives(inputs, model):
     outputs = model(inputs)
@@ -36,7 +34,6 @@ def compute_derivatives(inputs, model):
     grads2 = torch.autograd.grad(grads1, inputs, grad_outputs=torch.ones_like(grads1), create_graph=True)[0]
     grads3 = torch.autograd.grad(grads2, inputs, grad_outputs=torch.ones_like(grads2), create_graph=True)[0]
     return outputs, grads1, grads2, grads3
-
 
 # 训练模型
 def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None):
@@ -49,16 +46,19 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     if not os.path.exists(csv_file):
         with open(csv_file, mode="w", newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["Epochs", "Training Time (s)", "FLOPs (NN)", "FLOPs (Runge-Kutta)"])
+            writer.writerow(["Epochs", "Training Time (s)", "FLOPs (NN)", "FLOPs (Runge-Kutta)", "Math Solution Time (s)", "Model Test Time (s)"])
 
     start_time = time.time()
 
-    # 计算 FLOPs for NN
-    dummy_input = torch.randn(1, 1).to(inputs.device)
-    flops_nn, _ = profile(model, inputs=(dummy_input,), verbose=False)
+    # 计算总 FLOPs for NN
+    total_flops_nn = 0
 
     for epoch in tqdm(range(epochs), desc="Training Progress"):
         optimizer.zero_grad()
+
+        # 使用 thop 计算前向传播的 FLOPs
+        flops_per_forward, _ = profile(model, inputs=(inputs,), verbose=False)
+        total_flops_nn += 3 * flops_per_forward  # 前向传播和反向传播大约为三倍的计算量
 
         outputs, grads1, grads2, grads3 = compute_derivatives(inputs, model)
 
@@ -97,18 +97,28 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     num_points = inputs.size(0)
     flops_runge_kutta = runge_kutta_flops(num_points)
 
+    # 数学方法计算时间
+    math_start_time = time.time()
+    y_true, _ = true_solution(inputs.cpu().detach().numpy().flatten())
+    math_end_time = time.time()
+    math_solution_time = math_end_time - math_start_time
+
+    # 测试阶段模型运行时间
+    test_start_time = time.time()
+    outputs, grads1, _, _ = compute_derivatives(inputs, model)
+    test_end_time = time.time()
+    model_test_time = test_end_time - test_start_time
+
     # 将训练时间和 FLOPs 写入 CSV 文件
     with open(csv_file, mode="a", newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([epochs, training_time, flops_nn, flops_runge_kutta])
-
+        writer.writerow([epochs, training_time, total_flops_nn, flops_runge_kutta, math_solution_time, model_test_time])
 
 # 数据生成
 def generate_data(start, end, num_points_per_unit):
     num_points = int((end - start) * num_points_per_unit)
     x = torch.linspace(start, end, num_points).unsqueeze(1).requires_grad_(True)
     return x
-
 
 # 使用数学方法求解方程的函数
 def true_solution(x):
@@ -127,7 +137,6 @@ def true_solution(x):
     sol = solve_bvp(fun, bc, x, y)
     return sol.sol(x)[0], sol.sol(x)[1]
 
-
 # 初始化模型、损失函数和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = FunctionApproximator().to(device)
@@ -143,12 +152,12 @@ if os.path.exists(save_path):
     print("模型权重已加载。")
 
 # 生成数据
-start, end = 0, 10
+start, end = 0, 5
 num_points_per_unit = 100
 inputs = generate_data(start, end, num_points_per_unit).to(device)
 
 # 训练模型
-train_model(model, criterion, optimizer, inputs, epochs=100, save_path=save_path)
+train_model(model, criterion, optimizer, inputs, epochs=1000, save_path=save_path)
 
 # 测试和可视化
 outputs, grads1, _, _ = compute_derivatives(inputs, model)
@@ -173,7 +182,7 @@ print(f'R² Score: {r2:.4f}')
 
 # 绘制函数值比较图并保存
 plt.figure()
-plt.plot(x, y_true, label='Mathematical Solution (Runge-Kutta Method)', color='red', linestyle='--')
+plt.plot(x, y_true, label='Mathematical Solution ', color='red', linestyle='--')
 plt.plot(x, outputs, label='Predicted Function (PINNs)', color='blue')
 plt.legend()
 plt.xlabel('x')
@@ -184,7 +193,7 @@ plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-plt.plot(x, y_true_derivative, label='Mathematical First Derivative (Runge-Kutta Method)', color='red', linestyle='--')
+plt.plot(x, y_true_derivative, label='Mathematical First Derivative', color='red', linestyle='--')
 plt.plot(x, grads1, label='Predicted First Derivative (PINNs)', color='green')
 plt.legend(loc='upper left')
 plt.xlabel('x')

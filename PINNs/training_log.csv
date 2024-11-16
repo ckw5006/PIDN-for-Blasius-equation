@@ -1,0 +1,2 @@
+Epochs,Training Time (s),FLOPs (NN),FLOPs (Runge-Kutta),Math Solution Time (s),Model Test Time (s)
+1000,18.32463312149048,5460000000.0,6000,0.0040018558502197266,0.005724191665649414
