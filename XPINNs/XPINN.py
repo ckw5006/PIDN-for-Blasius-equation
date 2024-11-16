@@ -205,7 +205,7 @@ print(f"y_true_derivative_combined shape: {y_true_derivative_combined.shape}")
 
 # 绘制函数值比较图并保存
 plt.figure()
-plt.plot(x_math, y_true_combined, label='Mathematical Solution (Runge-Kutta Method)', color='red', linestyle='--')
+plt.plot(x_math, y_true_combined, label='Mathematical Solution ', color='red', linestyle='--')
 plt.plot(x_combined, outputs_combined, label='Predicted Function (XPINNs)', color='blue')
 plt.legend(loc='upper left')
 plt.xlabel('x')
@@ -216,7 +216,7 @@ plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-plt.plot(x_math, y_true_derivative_combined, label='Mathematical First Derivative (Runge-Kutta Method)', color='red', linestyle='--')
+plt.plot(x_math, y_true_derivative_combined, label='Mathematical First Derivative ', color='red', linestyle='--')
 plt.plot(x_combined, grads1_combined, label='Predicted First Derivative (XPINNs)', color='green')
 plt.legend(loc='upper left')
 plt.xlabel('x')

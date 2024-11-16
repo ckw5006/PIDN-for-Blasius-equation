@@ -101,10 +101,16 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     num_points = inputs.size(0)
     flops_runge_kutta = runge_kutta_flops(num_points)
 
+    # 数学方法计算时间
+    math_start_time = time.time()
+    y_true, _ = true_solution(inputs.cpu().detach().numpy().flatten())
+    math_end_time = time.time()
+    math_solution_time = math_end_time - math_start_time
+
     # 将训练时间和 FLOPs 写入 CSV 文件
     with open(csv_file, mode="a", newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([epochs, training_time, flops_nn, flops_runge_kutta])
+        writer.writerow([epochs, training_time, flops_nn, flops_runge_kutta, math_solution_time])
 
 
 # 数据生成

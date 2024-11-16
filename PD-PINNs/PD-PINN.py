@@ -143,7 +143,7 @@ if os.path.exists(save_path):
     print("模型权重已加载。")
 
 # 外部控制训练域扩展的逻辑
-start, end = 0, 5
+start, end = 0, 10
 aim = 11
 num_points_per_unit = 100
 current_end = end
@@ -153,7 +153,7 @@ while current_end < aim:
     inputs = generate_data(start, current_end, num_points_per_unit).to(device)
 
     # 训练模型
-    train_model(model, criterion, optimizer, inputs, epochs=100, save_path=save_path)
+    train_model(model, criterion, optimizer, inputs, epochs=200, save_path=save_path)
 
     # 如果损失达到阈值，则扩展训练域
     outputs, _, _, _ = compute_derivatives(inputs, model)
@@ -161,13 +161,18 @@ while current_end < aim:
     print("***")
     if loss.item() < 0.02:
         print(f'Loss {loss.item():.8f} below threshold, expanding training domain.')
-        current_end = min(current_end + 2, aim)
+        current_end = min(current_end + 1, aim)
         print(current_end)
+inference_start_time = time.time()
 
 # 测试和可视化
 outputs, grads1, _, _ = compute_derivatives(inputs, model)
 outputs = outputs.cpu().detach().numpy()
 grads1 = grads1.cpu().detach().numpy()
+inference_end_time = time.time()
+inference_time = inference_end_time - inference_start_time
+
+print(f"Inference Time: {inference_time:.4f} seconds")
 
 # 数学方式求解的结果
 x = inputs.cpu().detach().numpy().flatten()
@@ -187,22 +192,22 @@ print(f'R² Score: {r2:.4f}')
 
 # 绘制函数值比较图并保存
 plt.figure()
-plt.plot(x, y_true, label='Mathematical Solution (Runge-Kutta Method)', color='red', linestyle='--')
-plt.plot(x, outputs, label='Predicted Function (DTPINNs)', color='blue')
+plt.plot(x, y_true, label='Mathematical Solution ', color='red', linestyle='--')
+plt.plot(x, outputs, label='Predicted Function (PD-PINNs)', color='blue')
 plt.legend()
 plt.xlabel('x')
 plt.ylabel('f(x)')
-plt.title('Comparison of Mathematical Solution and DTPINNs Function Prediction')
+plt.title('Comparison of Mathematical Solution and PD-PINNs Function Prediction')
 plt.savefig('comparison_function_plot.png')  # 保存生成的图片
 plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-plt.plot(x, y_true_derivative, label='Mathematical First Derivative (Runge-Kutta Method)', color='red', linestyle='--')
-plt.plot(x, grads1, label='Predicted First Derivative (DTPINNs)', color='green')
+plt.plot(x, y_true_derivative, label='Mathematical First Derivative ', color='red', linestyle='--')
+plt.plot(x, grads1, label='Predicted First Derivative (PD-PINNs)', color='green')
 plt.legend(loc='upper left')
 plt.xlabel('x')
 plt.ylabel("f'(x)")
-plt.title('Comparison of Mathematical and Predicted First Derivative (DTPINNs)')
+plt.title('Comparison of Mathematical and Predicted First Derivative (PD-PINNs)')
 plt.savefig('comparison_derivative_plot.png')  # 保存生成的图片
 plt.show()

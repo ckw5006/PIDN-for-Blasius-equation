@@ -152,7 +152,7 @@ if os.path.exists(save_path):
     print("模型权重已加载。")
 
 # 生成数据
-start, end = 0, 5
+start, end = 0, 10
 num_points_per_unit = 100
 inputs = generate_data(start, end, num_points_per_unit).to(device)
 
