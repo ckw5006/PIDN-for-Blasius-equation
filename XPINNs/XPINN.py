@@ -129,22 +129,44 @@ def generate_data(start, end, num_points_per_unit):
     return x
 
 
-# 使用数学方法求解方程的函数
-def true_solution(x):
-    def fun(x, y):
-        return np.vstack((y[1], y[2], -0.5 * y[0] * y[2]))
+def true_solution(x, guessed_value=True):
+    def fun(t, y):
+        return np.array([y[1], y[2], -0.5 * y[0] * y[2]])
 
-    def bc(ya, yb):
-        return np.array([ya[0], ya[1], yb[1] - 1])
+    def shooting_method(x, guess, max_steps=1000, tolerance=1e-8):
+        step = 0.0005  # 更小的步长用于更精细的调整射击值
+        iter_count = 0
+        max_iter = max_steps
+        best_guess = guess
+        converged = False
+        previous_error = float('inf')
+
+        while iter_count < max_iter and not converged:
+            y0 = [0, 0, best_guess]
+            sol_ivp = solve_ivp(fun, [x[0], x[-1]], y0, t_eval=x, method='RK45')
+
+            error = abs(sol_ivp.y[1][-1] - 1)
+            if error < tolerance:
+                converged = True
+            elif error > previous_error:
+                # 如果误差开始增大，减小步长以避免过冲
+                step *= 0.5
+            previous_error = error
+            best_guess += step if not converged else 0
+            iter_count += 1
+
+        if not converged:
+            print(f"Warning: Shooting method did not converge after {max_iter} iterations.")
+        else:
+            print(f"Shooting method converged after {iter_count} iterations with guess {best_guess}.")
+
+        return sol_ivp
 
     # 确保 x 的长度与生成数据一致
-    y = np.zeros((3, x.size))
-    y[0, 0] = 0  # f(0) = 0
-    y[1, 0] = 0  # f'(0) = 0
-    y[2, 0] = 0.33206  # f''(0) = 0.33206
+    guess = 0.1
+    sol = shooting_method(x, guess) if not guessed_value else shooting_method(x, 0.33206)
 
-    sol = solve_bvp(fun, bc, x, y)
-    return sol.sol(x)[0], sol.sol(x)[1]
+    return sol.y[0], sol.y[1]
 
 # 初始化模型、损失函数和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -193,20 +215,15 @@ grads1_combined = np.concatenate(grads1_list).flatten()  # 扁平化一阶导数
 
 # 计算整个区间上的数学解（只计算一次）
 x_math = math_inputs.cpu().detach().numpy().flatten()
-y_true_combined, y_true_derivative_combined = true_solution(x_math)
+y_true_guessed, y_true_derivative_guessed = true_solution(x_math, guessed_value=True)
+y_true_no_guess, y_true_derivative_no_guess = true_solution(x_math, guessed_value=False)
 
-# 打印各个拼接部分的形状
-print(f"x_combined shape: {x_combined.shape}")
-print(f"outputs_combined shape: {outputs_combined.shape}")
-print(f"grads1_combined shape: {grads1_combined.shape}")
-print(f"x_math shape: {x_math.shape}")
-print(f"y_true_combined shape: {y_true_combined.shape}")
-print(f"y_true_derivative_combined shape: {y_true_derivative_combined.shape}")
 
 # 绘制函数值比较图并保存
 plt.figure()
-plt.plot(x_math, y_true_combined, label='Mathematical Solution ', color='red', linestyle='--')
-plt.plot(x_combined, outputs_combined, label='Predicted Function (XPINNs)', color='blue')
+plt.plot(x_math, y_true_guessed, label="Shooting Method with Guessed Value ", color='red', linestyle='--')
+plt.plot(x_math, y_true_no_guess, label="Shooting Method without Guessed Value ", color='blue', linestyle='-.')
+plt.plot(x_combined, outputs_combined, label='Predicted Function (XPINNs)', color='green')
 plt.legend(loc='upper left')
 plt.xlabel('x')
 plt.ylabel('f(x)')
@@ -216,7 +233,8 @@ plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-plt.plot(x_math, y_true_derivative_combined, label='Mathematical First Derivative ', color='red', linestyle='--')
+plt.plot(x_math, y_true_derivative_guessed, label="Shooting Method with Guessed Value ", color='red', linestyle='--')
+plt.plot(x_math, y_true_derivative_no_guess, label="Shooting Method without Guessed Value ", color='blue', linestyle='-.')
 plt.plot(x_combined, grads1_combined, label='Predicted First Derivative (XPINNs)', color='green')
 plt.legend(loc='upper left')
 plt.xlabel('x')

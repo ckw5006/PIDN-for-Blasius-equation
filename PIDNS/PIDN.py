@@ -128,23 +128,65 @@ def generate_data(start, end, num_points_per_unit):
     return x
 
 
-# 使用 Runge-Kutta 方法求解 Blasius 方程的函数
-def true_solution(x):
-    def equations(t, y):
-        return [y[1], y[2], -0.5 * y[0] * y[2]]
+def true_solution(x, guessed_value=True):
+    def fun(t, y):
+        return np.array([y[1], y[2], -0.5 * y[0] * y[2]])
 
-    # 初始条件 f(0)=0, f'(0)=0, f''(0)=0.33206
-    y0 = [0, 0, 0.33206]
+    def shooting_method(x, guess, max_steps=5, tolerance=1e-6):
+        step = 0.0005  # 更小的步长用于更精细的调整射击值
+        iter_count = 0
+        max_iter = max_steps
+        best_guess = guess
+        converged = False
+        previous_error = float('inf')
 
-    # 使用 Runge-Kutta 方法（solve_ivp）求解方程
-    sol = solve_ivp(equations, [x[0], x[-1]], y0, t_eval=x, method='RK45')
+        while iter_count < max_iter and not converged:
+            y0 = [0, 0, best_guess]
+            sol_ivp = solve_ivp(fun, [x[0], x[-1]], y0, t_eval=x, method='RK45')
 
-    # 检查是否成功收敛
-    if not sol.success:
-        raise RuntimeError(f"Runge-Kutta solver did not converge: {sol.message}")
+            error = abs(sol_ivp.y[1][-1] - 1)
+            if error < tolerance:
+                converged = True
+            elif error > previous_error:
+                # 如果误差开始增大，减小步长以避免过冲
+                step *= 0.5
+            previous_error = error
+            best_guess += step if not converged else 0
+            iter_count += 1
+            print("*******")
 
-    return sol.y[0], sol.y[1]  # 返回 f(x) 和 f'(x)
+        if not converged:
+            print(f"Warning: Shooting method did not converge after {max_iter} iterations.")
+        else:
+            print(f"Shooting method converged after {iter_count} iterations with guess {best_guess}.")
 
+        return sol_ivp
+
+    # 确保 x 的长度与生成数据一致
+    guess = 0.1
+    sol = shooting_method(x, guess) if not guessed_value else shooting_method(x, 0.33206)
+
+    return sol.y[0], sol.y[1]
+# def true_solution(x, guessed_value=True):
+#     def fun(t, y):
+#         return np.array([y[1], y[2], -0.5 * y[0] * y[2]])
+#
+#     def runge_kutta_method(x, y0):
+#         sol_ivp = solve_ivp(fun, [x[0], x[-1]], y0, t_eval=x, method='RK45')
+#         return sol_ivp
+#
+#     # 初始条件
+#     y0 = [0, 0, 0.33206] if guessed_value else [0, 0, 0.1]
+#
+#     # 使用 Runge-Kutta 方法进行求解
+#     sol = runge_kutta_method(x, y0)
+#
+#     if not sol.success:
+#         print(f"Warning: Runge-Kutta method did not converge.")
+#     else:
+#         print(f"Runge-Kutta method converged successfully.")
+#
+#     return sol.y[0], sol.y[1]
 
 # 初始化模型、损失函数和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -161,38 +203,29 @@ if os.path.exists(save_path):
     print("模型权重已加载。")
 
 # 生成数据
-start, end = 0, 1000
+start, end = 0, 3000
 num_points_per_unit = 100
 inputs = generate_data(start, end, num_points_per_unit).to(device)
 
 # 训练模型
-train_model(model, criterion, optimizer, inputs, epochs=300, save_path=save_path)
+train_model(model, criterion, optimizer, inputs, epochs=60, save_path=save_path)
 
 # 测试和可视化
 outputs, grads1, _, _ = compute_derivatives(inputs, model)
 outputs = outputs.cpu().detach().numpy()
 grads1 = grads1.cpu().detach().numpy()
 
-# 数学方式求解的结果
+# 数学方式求解的结果（有和无 f''(0) 猜测值）
 x = inputs.cpu().detach().numpy().flatten()
-y_true, y_true_derivative = true_solution(x)
-
-# 计算误差指标
-# mse = mean_squared_error(y_true, outputs)
-# mae = mean_absolute_error(y_true, outputs)
-# std_dev = np.std(y_true - outputs)
-# r2 = r2_score(y_true, outputs)
-
-# 打印误差指标
-# print(f'Mean Squared Error: {mse:.8f}')
-# print(f'Mean Absolute Error: {mae:.8f}')
-# print(f'Standard Deviation of Error: {std_dev:.8f}')
-# print(f'R² Score: {r2:.4f}')
+# y_true_guessed, y_true_derivative_guessed = true_solution(x, guessed_value=True)
+# y_true_no_guess, y_true_derivative_no_guess = true_solution(x, guessed_value=False)
 
 # 绘制函数值比较图并保存
 plt.figure()
-plt.plot(x, y_true, label='Mathematical Solution ', color='red', linestyle='--')
-plt.plot(x, outputs, label='Predicted Function (PIDNs)', color='blue')
+# plt.plot(x, y_true_guessed, label="Shooting Method with Guessed Value ", color='red', linestyle='--')
+# plt.plot(x, y_true_no_guess, label="Shooting Method without Guessed Value ", color='blue', linestyle='-.')
+plt.plot(x, outputs, label='Predicted Function (PIDNs)', color='green', linestyle='-')
+
 plt.legend()
 plt.xlabel('x')
 plt.ylabel('f(x)')
@@ -202,9 +235,11 @@ plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-plt.plot(x, y_true_derivative, label='Mathematical First Derivative', color='red', linestyle='--')
-plt.plot(x, grads1, label='Predicted First Derivative (PIDNs)', color='green')
-plt.legend(loc='lower right')
+# plt.plot(x, y_true_derivative_guessed, label="Shooting Method with Guessed Value ", color='red', linestyle='--')
+# plt.plot(x, y_true_derivative_no_guess, label="Shooting Method without Guessed Value ", color='blue', linestyle='-.')
+plt.plot(x, grads1, label='Predicted First Derivative (PIDNs)', color='green', linestyle='-')
+
+plt.legend()
 plt.xlabel('x')
 plt.ylabel("f'(x)")
 plt.title('Comparison of Mathematical and Predicted First Derivative (PIDNs)')
