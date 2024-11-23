@@ -53,18 +53,16 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     if not os.path.exists(csv_file):
         with open(csv_file, mode="w", newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["Epochs", "Training Time (s)", "FLOPs (NN)", "FLOPs (Runge-Kutta)", "Math Solution Time (s)", "Model Test Time (s)"])
+            writer.writerow(["Epochs", "Training Time (s)", "FLOPs (NN)", "FLOPs (Runge-Kutta)"])
 
     start_time = time.time()
 
-    total_flops_nn = 0  # 累计 FLOPs
+    # 计算 FLOPs for NN
+    dummy_input = torch.randn(1, 1).to(inputs.device)
+    flops_nn, _ = profile(model, inputs=(dummy_input,), verbose=False)
 
     for epoch in tqdm(range(epochs), desc="Training Progress"):
         optimizer.zero_grad()
-
-        # 计算模型前向传播的 FLOPs
-        flops, _ = profile(model, inputs=(inputs,), verbose=False)
-        total_flops_nn += flops
 
         function_values, grads1, grads2, grads3 = compute_derivatives(inputs, model)
 
@@ -104,21 +102,15 @@ def train_model(model, criterion, optimizer, inputs, epochs=400, save_path=None)
     flops_runge_kutta = runge_kutta_flops(num_points)
 
     # 数学方法计算时间
-    math_start_time = time.time()
-    y_true, y_true_derivative = true_solution(inputs.cpu().detach().numpy().flatten())
-    math_end_time = time.time()
-    math_solution_time = math_end_time - math_start_time
-
-    # 测试阶段模型运行时间
-    test_start_time = time.time()
-    outputs, grads1, _, _ = compute_derivatives(inputs, model)
-    test_end_time = time.time()
-    model_test_time = test_end_time - test_start_time
+    # math_start_time = time.time()
+    # y_true, _ = true_solution(inputs.cpu().detach().numpy().flatten())
+    # math_end_time = time.time()
+    # math_solution_time = math_end_time - math_start_time
 
     # 将训练时间和 FLOPs 写入 CSV 文件
     with open(csv_file, mode="a", newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([epochs, training_time, total_flops_nn, flops_runge_kutta, math_solution_time, model_test_time])
+        # writer.writerow([epochs, training_time, flops_nn, flops_runge_kutta, math_solution_time])
 
 
 # 数据生成
@@ -128,65 +120,23 @@ def generate_data(start, end, num_points_per_unit):
     return x
 
 
-def true_solution(x, guessed_value=True):
-    def fun(t, y):
-        return np.array([y[1], y[2], -0.5 * y[0] * y[2]])
+# 使用数学方法求解方程的函数
+def true_solution(x):
+    def fun(x, y):
+        return np.vstack((y[1], y[2], -0.5 * y[0] * y[2]))
 
-    def shooting_method(x, guess, max_steps=5, tolerance=1e-6):
-        step = 0.0005  # 更小的步长用于更精细的调整射击值
-        iter_count = 0
-        max_iter = max_steps
-        best_guess = guess
-        converged = False
-        previous_error = float('inf')
-
-        while iter_count < max_iter and not converged:
-            y0 = [0, 0, best_guess]
-            sol_ivp = solve_ivp(fun, [x[0], x[-1]], y0, t_eval=x, method='RK45')
-
-            error = abs(sol_ivp.y[1][-1] - 1)
-            if error < tolerance:
-                converged = True
-            elif error > previous_error:
-                # 如果误差开始增大，减小步长以避免过冲
-                step *= 0.5
-            previous_error = error
-            best_guess += step if not converged else 0
-            iter_count += 1
-            print("*******")
-
-        if not converged:
-            print(f"Warning: Shooting method did not converge after {max_iter} iterations.")
-        else:
-            print(f"Shooting method converged after {iter_count} iterations with guess {best_guess}.")
-
-        return sol_ivp
+    def bc(ya, yb):
+        return np.array([ya[0], ya[1], yb[1] - 1])
 
     # 确保 x 的长度与生成数据一致
-    guess = 0.1
-    sol = shooting_method(x, guess) if not guessed_value else shooting_method(x, 0.33206)
+    y = np.zeros((3, x.size))
+    y[0, 0] = 0  # f(0) = 0
+    y[1, 0] = 0  # f'(0) = 0
+    y[2, 0] = 0.33206  # f''(0) = 0.33206
 
-    return sol.y[0], sol.y[1]
-# def true_solution(x, guessed_value=True):
-#     def fun(t, y):
-#         return np.array([y[1], y[2], -0.5 * y[0] * y[2]])
-#
-#     def runge_kutta_method(x, y0):
-#         sol_ivp = solve_ivp(fun, [x[0], x[-1]], y0, t_eval=x, method='RK45')
-#         return sol_ivp
-#
-#     # 初始条件
-#     y0 = [0, 0, 0.33206] if guessed_value else [0, 0, 0.1]
-#
-#     # 使用 Runge-Kutta 方法进行求解
-#     sol = runge_kutta_method(x, y0)
-#
-#     if not sol.success:
-#         print(f"Warning: Runge-Kutta method did not converge.")
-#     else:
-#         print(f"Runge-Kutta method converged successfully.")
-#
-#     return sol.y[0], sol.y[1]
+    sol = solve_bvp(fun, bc, x, y)
+    return sol.sol(x)[0], sol.sol(x)[1]
+
 
 # 初始化模型、损失函数和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -203,45 +153,52 @@ if os.path.exists(save_path):
     print("模型权重已加载。")
 
 # 生成数据
-start, end = 0, 3000
+start, end = 0, 10
 num_points_per_unit = 100
 inputs = generate_data(start, end, num_points_per_unit).to(device)
 
 # 训练模型
-train_model(model, criterion, optimizer, inputs, epochs=60, save_path=save_path)
+train_model(model, criterion, optimizer, inputs, epochs=100, save_path=save_path)
 
 # 测试和可视化
 outputs, grads1, _, _ = compute_derivatives(inputs, model)
 outputs = outputs.cpu().detach().numpy()
 grads1 = grads1.cpu().detach().numpy()
 
-# 数学方式求解的结果（有和无 f''(0) 猜测值）
+# 数学方式求解的结果
 x = inputs.cpu().detach().numpy().flatten()
-# y_true_guessed, y_true_derivative_guessed = true_solution(x, guessed_value=True)
-# y_true_no_guess, y_true_derivative_no_guess = true_solution(x, guessed_value=False)
+y_true, y_true_derivative = true_solution(x)
+
+# 计算误差指标
+# mse = mean_squared_error(y_true, outputs)
+# mae = mean_absolute_error(y_true, outputs)
+# std_dev = np.std(y_true - outputs)
+# r2 = r2_score(y_true, outputs)
+
+# 打印误差指标
+# print(f'Mean Squared Error: {mse:.8f}')
+# print(f'Mean Absolute Error: {mae:.8f}')
+# print(f'Standard Deviation of Error: {std_dev:.8f}')
+# print(f'R² Score: {r2:.4f}')
 
 # 绘制函数值比较图并保存
 plt.figure()
-# plt.plot(x, y_true_guessed, label="Shooting Method with Guessed Value ", color='red', linestyle='--')
-# plt.plot(x, y_true_no_guess, label="Shooting Method without Guessed Value ", color='blue', linestyle='-.')
-plt.plot(x, outputs, label='Predicted Function (PIDNs)', color='green', linestyle='-')
-
+plt.plot(x, y_true, label='Mathematical Solution (Runge-Kutta Method)', color='red', linestyle='--')
+plt.plot(x, outputs, label='Predicted Function (PINNs)', color='blue')
 plt.legend()
 plt.xlabel('x')
 plt.ylabel('f(x)')
-plt.title('Comparison of Mathematical Solution and PIDNs Function Prediction')
+plt.title('Comparison of Mathematical Solution and PINNs Function Prediction')
 plt.savefig('comparison_function_plot.png')  # 保存生成的图片
 plt.show()
 
 # 绘制一阶导数比较图并保存
 plt.figure()
-# plt.plot(x, y_true_derivative_guessed, label="Shooting Method with Guessed Value ", color='red', linestyle='--')
-# plt.plot(x, y_true_derivative_no_guess, label="Shooting Method without Guessed Value ", color='blue', linestyle='-.')
-plt.plot(x, grads1, label='Predicted First Derivative (PIDNs)', color='green', linestyle='-')
-
-plt.legend()
+plt.plot(x, y_true_derivative, label='Mathematical First Derivative (Runge-Kutta Method)', color='red', linestyle='--')
+plt.plot(x, grads1, label='Predicted First Derivative (PINNs)', color='green')
+plt.legend(loc='upper left')
 plt.xlabel('x')
 plt.ylabel("f'(x)")
-plt.title('Comparison of Mathematical and Predicted First Derivative (PIDNs)')
+plt.title('Comparison of Mathematical and Predicted First Derivative (PINNs)')
 plt.savefig('comparison_derivative_plot.png')  # 保存生成的图片
 plt.show()
